@@ -61,7 +61,8 @@ def decodificar(texto):
         raise ValueError(f"Instrucción no soportada: '{texto}'")
     return campos
 
-class CPU:
+class UnidadProceso:
+
     def __init__(self, ruta_instrucciones, ruta_datos):
         # Componentes
         self.mem_inst = MemoriaInstrucciones()
@@ -118,26 +119,50 @@ class CPU:
                   f"{str(d['rs'] or '-'):<5} {str(d['rt'] or '-'):<5} "
                   f"{'-' if d['inmediato'] is None else d['inmediato']}")
 
-    def _etapa_wb(self):
+    def avanzar_reloj(self):
+        """Fin de ciclo: latch() en los cuatro registros de acoplamiento."""
+        for registro in (self.IF_ID, self.ID_EX, self.EX_MEM, self.MEM_WB):
+            registro.latch()
+
+    # Etapas (pendientes)
+    def etapa_wb(self):
         raise NotImplementedError
 
-    def _etapa_mem(self):
+    def etapa_mem(self):
         raise NotImplementedError
 
-    def _etapa_ex(self):
+    def etapa_ex(self):
         raise NotImplementedError
 
-    def _etapa_id(self):
+    def etapa_id(self):
         raise NotImplementedError
 
-    def _etapa_if(self):
+    def etapa_if(self):
         raise NotImplementedError
-
-    def ejecutar_ciclo(self):
-        raise NotImplementedError("Orden: WB -> MEM -> EX -> ID -> IF, luego latch()")
 
     def mostrar_estado(self):
         raise NotImplementedError
+
+class UnidadControl:
+
+    def __init__(self, unidad_proceso):
+        self.proceso = unidad_proceso
+
+    def detectar_riesgo_raw(self, decodificada):
+        raise NotImplementedError
+
+    def resolver_salto(self, decodificada, val_rs, val_rt):
+        raise NotImplementedError
+
+class CPU:
+
+    def __init__(self, ruta_instrucciones, ruta_datos):
+        self.unidad_proceso = UnidadProceso(ruta_instrucciones, ruta_datos)
+        self.unidad_control = UnidadControl(self.unidad_proceso)
+
+    def ejecutar_ciclo(self):
+        raise NotImplementedError
+        #todo ("Orden: WB -> MEM -> EX -> ID -> IF, luego avanzar_reloj()")
 
     def ejecutar(self):
         raise NotImplementedError
@@ -152,8 +177,8 @@ def main():
     args = parser.parse_args()
 
     cpu = CPU(args.instrucciones, args.datos)
-    cpu.mostrar_carga()
-    cpu.mostrar_decodificacion()
+    cpu.unidad_proceso.mostrar_carga()
+    cpu.unidad_proceso.mostrar_decodificacion()
 
 if __name__ == "__main__":
     main()
