@@ -114,22 +114,3 @@ class ALU:
         else:
             raise ValueError(f"Operación de ALU no soportada: {operacion}")
         return _num(res)
-
-class UnidadControl:
-
-    OPS_ALU = ("ADD", "ADDI", "SUB", "SUBI")
-
-    def generar_senales(self, op):
-        senales = {"RegWrite": 0, "MemRead": 0, "MemWrite": 0, "EsSalto": 0}
-        if op in self.OPS_ALU:
-            senales["RegWrite"] = 1
-        elif op == "LW":
-            senales["RegWrite"] = 1
-            senales["MemRead"] = 1
-        elif op == "SW":
-            senales["MemWrite"] = 1
-        elif op in ("BEQ", "J"):
-            senales["EsSalto"] = 1
-        else:
-            raise ValueError(f"Instrucción no soportada: {op}")
-        return senales

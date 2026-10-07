@@ -3,17 +3,16 @@ import os
 import re
 
 from componentes_base import (
-    ALU, BancoRegistros, MemoriaDatos, MemoriaInstrucciones, UnidadControl,
+    ALU, BancoRegistros, MemoriaDatos, MemoriaInstrucciones,
 )
 from registros_pipeline import (
     RegistroEX_MEM, RegistroID_EX, RegistroIF_ID, RegistroMEM_WB,
 )
 
-OPS_TIPO_R = ("ADD", "SUB")  # op Rd Rs Rt
-OPS_TIPO_I = ("ADDI", "SUBI")  # op Rt Rs inmediato
+OPS_TIPO_R = ("ADD", "SUB")
+OPS_TIPO_I = ("ADDI", "SUBI")
 _RE_REG = re.compile(r"R(?:[0-9]|[12][0-9]|3[01])")
 _RE_MEM = re.compile(r"(-?\d+)\((R\d+)\)")
-
 
 def decodificar(texto):
     partes = texto.split()
@@ -69,7 +68,6 @@ class CPU:
         self.mem_datos = MemoriaDatos()
         self.banco = BancoRegistros()
         self.alu = ALU()
-        self.uc = UnidadControl()
 
         # Registros de acoplamiento (pipeline inicialmente vacío)
         self.IF_ID = RegistroIF_ID()
@@ -119,7 +117,6 @@ class CPU:
             print(f"  {indice:>3}  {d['op']:<5} {str(d['reg_destino'] or '-'):<5} "
                   f"{str(d['rs'] or '-'):<5} {str(d['rt'] or '-'):<5} "
                   f"{'-' if d['inmediato'] is None else d['inmediato']}")
-            self.uc.generar_senales(d["op"])  # comprueba que la UC conoce la operación
 
     def _etapa_wb(self):
         raise NotImplementedError
@@ -145,7 +142,6 @@ class CPU:
     def ejecutar(self):
         raise NotImplementedError
 
-
 def main():
     base = os.path.dirname(os.path.abspath(__file__))
     parser = argparse.ArgumentParser(description="Simulador MIPS segmentado de 5 etapas")
@@ -158,7 +154,6 @@ def main():
     cpu = CPU(args.instrucciones, args.datos)
     cpu.mostrar_carga()
     cpu.mostrar_decodificacion()
-
 
 if __name__ == "__main__":
     main()

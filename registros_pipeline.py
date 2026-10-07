@@ -27,12 +27,12 @@ class RegistroIF_ID(RegistroPipeline):
 
 class RegistroID_EX(RegistroPipeline):
     CAMPOS = ("pc", "texto", "op", "reg_destino", "rs", "rt",
-              "val_rs", "val_rt", "inmediato", "senales")
+              "val_rs", "val_rt", "inmediato")
 
 class RegistroEX_MEM(RegistroPipeline):
     CAMPOS = ("pc", "texto", "op", "reg_destino", "resultado_alu",
-              "val_rt", "senales")
+              "val_rt")
 
 class RegistroMEM_WB(RegistroPipeline):
     CAMPOS = ("pc", "texto", "reg_destino", "resultado_alu",
-              "dato_memoria", "senales")
+              "dato_memoria")
