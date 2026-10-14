@@ -63,6 +63,11 @@ def decodificar(texto):
     return campos
 
 class UnidadProceso:
+    """
+        Tiene 5 etapas del pipeline MIPS (IF, ID, EX, MEM, WB) en orden
+        inverso de ejecución dentro de cada ciclo de reloj para garantizar el paso de
+        datos transparente entre los registros inter-etapa (IF/ID, ID/EX, EX/MEM, MEM/WB).
+    """
 
     def __init__(self, ruta_instrucciones, ruta_datos):
         # Componentes
@@ -137,6 +142,13 @@ class UnidadProceso:
 
     # ---------------------------------------------------------------- etapas
     def etapa_wb(self):
+        """
+            Ejecuta la etapa Write Back (WB) del cauce MIPS.
+
+            Recupera la instrucción del registro MEM/WB y escribe el resultado
+            o el dato leído de la memoria en el Banco de Registros
+            (en la primera parte del ciclo).
+        """
         e = self.MEM_WB.actual
         if e is None:
             self.wb_texto = None
@@ -152,6 +164,13 @@ class UnidadProceso:
         self.n_completadas += 1
 
     def etapa_mem(self):
+        """
+            Ejecuta la etapa Memory (MEM) del cauce MIPS.
+
+            Realiza el acceso a la memoria de datos si la instrucción es de acceso a memoria:
+            lee de la memoria si es un 'LW' o escribe en la memoria si es un 'SW'.
+            Carga los resultados en el registro inter-etapa MEM/WB.
+        """
         e = self.EX_MEM.actual
         if e is None:
             self.MEM_WB.siguiente = None
@@ -169,6 +188,12 @@ class UnidadProceso:
         )
 
     def etapa_ex(self):
+        """
+            Ejecuta la etapa Execution (EX) del cauce MIPS.
+
+            Realiza el cálculo de la ALU según la operación (tipo R, tipo I o cálculo
+            de dirección para LW/SW) y guarda el resultado en el registro ID/EX -> EX/MEM.
+        """
         e = self.ID_EX.actual
         if e is None:
             self.EX_MEM.siguiente = None
@@ -188,6 +213,12 @@ class UnidadProceso:
         )
 
     def etapa_id(self, control):
+        """
+            Ejecuta la etapa Instruction Decode (ID) del cauce MIPS.
+
+            Decodifica la instrucción, detecta riesgos RAW (inyectando burbujas),
+            lee los operandos del banco de registros y resuelve la condición de salto.
+        """
         entrada = self.IF_ID.actual
         if entrada is None:
             self.ID_EX.siguiente = None
@@ -216,6 +247,12 @@ class UnidadProceso:
         )
 
     def etapa_if(self, control):
+        """
+            Ejecuta la etapa Instruction Fetch (IF) del cauce MIPS.
+
+            Lee la instrucción apuntada por el PC en la memoria de instrucciones,
+            gestiona las paradas (stalls) y aplica los vaciados (flushes) en caso de salto.
+        """
         seg = control.segmentacion
         if seg.stall:
             seg.registrar("IF: PC retenido, no se captura instrucción")
@@ -234,8 +271,7 @@ class UnidadProceso:
             self.IF_ID.vaciar()
             seg.registrar_flush(texto if texto is not None else "NOP")
 
-    @staticmethod
-    def _texto(registro):
+    def _texto(self, registro):
         return registro.actual["texto"] if registro.actual else "NOP"
 
     def mostrar_estado(self, control):
@@ -274,7 +310,12 @@ class UnidadProceso:
             f"MEM[{a}]={v}" for a, v in sorted(self.mem_datos.datos.items())))
 
 class Forwarding:
-
+    """
+        Compara los registros fuente (rs, rt) de la instrucción en la etapa ID con
+        los registros de destino de las instrucciones en curso en las etapas EX y MEM.
+        Ignora las coincidencias en la etapa WB, ya que la escritura en el Banco de Registros
+        ocurre en la primera mitad del ciclo y la lectura en la segunda.
+    """
     def __init__(self, unidad_proceso):
         self.proceso = unidad_proceso
         self.habilitado = False
@@ -285,14 +326,16 @@ class Forwarding:
                    if r is not None and r != "R0"}
         conflictos = []
         # ID_EX.actual = instrucción en EX; EX_MEM.actual = instrucción en MEM
-        # (la que está en WB no cuenta: escribe en la 1.ª mitad del ciclo)
         for etapa, nombre in ((p.ID_EX.actual, "EX"), (p.EX_MEM.actual, "MEM")):
             if etapa is not None and etapa["reg_destino"] in fuentes:
                 conflictos.append((etapa["reg_destino"], etapa["texto"], nombre))
         return conflictos
 
 class Segmentacion:
-
+    """
+        Rastrea las paradas del cauce, la dirección de destino de los saltos
+        y acumula los eventos y contadores globales de stalls y flushes.
+    """
     def __init__(self):
         self.stall = False          # hay parada en este ciclo
         self.destino_salto = None   # índice de instrucción si se toma un salto
@@ -322,7 +365,11 @@ class Segmentacion:
         self.eventos.append(f"FLUSH: descartada '{descartada}' capturada en IF")
 
 class UnidadControl:
-
+    """
+        Gestiona el control de riesgos de datos (RAW) y la resolución de saltos en el cauce.
+        Supervisa la detección de dependencias RAW para la inyección de paradas (stalls)
+        y evalúa las condiciones de los saltos (BEQ, J) para actualizar el PC y gestionar los flushes.
+    """
     def __init__(self, unidad_proceso):
         self.proceso = unidad_proceso
         self.forwarding = Forwarding(unidad_proceso)
@@ -357,7 +404,9 @@ class UnidadControl:
         return False, None
 
 class CPU:
-
+    """
+        Clase principal, inicializamos todas las partes necesarias y empezamos el ciclo.
+    """
     def __init__(self, ruta_instrucciones, ruta_datos):
         self.unidad_proceso = UnidadProceso(ruta_instrucciones, ruta_datos)
         self.unidad_control = UnidadControl(self.unidad_proceso)
@@ -368,7 +417,7 @@ class CPU:
         p.eventos = []
         c.nuevo_ciclo()
 
-        # Orden inverso: WB escribe antes de que ID lea (half-cycle rule)
+        # Orden inverso: WB escribe antes de que ID lea
         p.etapa_wb()
         p.etapa_mem()
         p.etapa_ex()
@@ -384,7 +433,7 @@ class CPU:
             if p.terminado():
                 break
             if p.ciclo >= MAX_CICLOS:
-                raise RuntimeError(f"Se superaron {MAX_CICLOS} ciclos: ¿bucle infinito?")
+                raise RuntimeError(f"Se superaron {MAX_CICLOS} ")
         p.mostrar_resumen(self.unidad_control)
 
 def main():
