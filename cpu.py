@@ -15,6 +15,18 @@ _RE_REG = re.compile(r"R(?:[0-9]|[12][0-9]|3[01])")
 _RE_MEM = re.compile(r"(-?\d+)\((R\d+)\)")
 MAX_CICLOS = 10_000  # protección frente a bucles infinitos
 
+# ---------------------------------------------------------------- FORMATO Y COLORES
+COLOR_IF = "\033[96m"  # Cian
+COLOR_ID = "\033[93m"  # Amarillo
+COLOR_EX = "\033[92m"  # Verde
+COLOR_MEM = "\033[95m"  # Magenta
+COLOR_WB = "\033[91m"  # Rojo
+COLOR_RESET = "\033[0m"
+COLOR_BOLD = "\033[1m"
+COLOR_DIM = "\033[2m"
+COLOR_EVENTO = "\033[94m" # Azul brillante
+
+
 def decodificar(texto):
     partes = texto.split()
     op, args = partes[0].upper(), partes[1:]
@@ -62,6 +74,7 @@ def decodificar(texto):
         raise ValueError(f"Instrucción no soportada: '{texto}'")
     return campos
 
+
 class UnidadProceso:
     """
         Tiene 5 etapas del pipeline MIPS (IF, ID, EX, MEM, WB) en orden
@@ -86,9 +99,9 @@ class UnidadProceso:
         self.PC = 0
         self.ciclo = 0
         self.registros_iniciales = {}
-        self.regs_modificados = set()   # registros a mostrar en consola
-        self.wb_texto = None            # instrucción que completa WB en el ciclo
-        self.eventos = []               # eventos del camino de datos en el ciclo
+        self.regs_modificados = set()  # registros a mostrar en consola
+        self.wb_texto = None  # instrucción que completa WB en el ciclo
+        self.eventos = []  # eventos del camino de datos en el ciclo
         self.n_completadas = 0
 
         self.cargar_entradas(ruta_instrucciones, ruta_datos)
@@ -101,27 +114,30 @@ class UnidadProceso:
         self.regs_modificados = {r for r in self.registros_iniciales if r != "R0"}
 
     def mostrar_carga(self):
-        print("=== INSTRUCCIONES CARGADAS ===")
+        print(f"\n{COLOR_BOLD}=== INSTRUCCIONES CARGADAS ==={COLOR_RESET}")
         for indice, texto in sorted(self.mem_inst.datos.items()):
             etiquetas = [e for e, i in self.mem_inst.etiquetas.items() if i == indice]
-            marca = f"   <- {', '.join(etiquetas)}" if etiquetas else ""
+            marca = f"   {COLOR_DIM}<- {', '.join(etiquetas)}{COLOR_RESET}" if etiquetas else ""
             print(f"  [{indice:2d}] {texto}{marca}")
-        print("\n=== ETIQUETAS ===")
+
+        print(f"\n{COLOR_BOLD}=== ETIQUETAS ==={COLOR_RESET}")
         for nombre, indice in self.mem_inst.etiquetas.items():
             print(f"  {nombre} -> {indice}")
-        print("\n=== REGISTROS INICIALES ===")
+
+        print(f"\n{COLOR_BOLD}=== REGISTROS INICIALES ==={COLOR_RESET}")
         regs = ", ".join(f"{r}={self.banco.leer(r)}"
-                         for r in sorted(self.registros_iniciales, key=lambda r: int(r[1:])))
+                         for r in sorted(self.registros_iniciales, key=lambda r: int(r[1:])) or ["R0=0"])
         print(f"  {regs}")
-        print("\n=== MEMORIA DE DATOS INICIAL ===")
+
+        print(f"\n{COLOR_BOLD}=== MEMORIA DE DATOS INICIAL ==={COLOR_RESET}")
         mem = ", ".join(f"MEM[{a}]={v}" for a, v in sorted(self.mem_datos.datos.items()))
-        print(f"  {mem}")
-        print(f"\nPC = {self.PC} | Pipeline vacio: "
+        print(f"  {mem if mem else '(vacía)'}")
+        print(f"\n{COLOR_BOLD}PC{COLOR_RESET} = {self.PC} | Pipeline vacío: "
               f"{all(r.actual is None for r in (self.IF_ID, self.ID_EX, self.EX_MEM, self.MEM_WB))}")
 
     def mostrar_decodificacion(self):
-        print("\n=== DECODIFICACIÓN ===")
-        print(f"  {'idx':>3}  {'op':<5} {'dest':<5} {'rs':<5} {'rt':<5} inmediato/etiqueta")
+        print(f"\n{COLOR_BOLD}=== DECODIFICACIÓN ==={COLOR_RESET}")
+        print(f"  {COLOR_DIM}{'idx':>3}  {'op':<5} {'dest':<5} {'rs':<5} {'rt':<5} inmediato/etiqueta{COLOR_RESET}")
         for indice, texto in sorted(self.mem_inst.datos.items()):
             d = decodificar(texto)
             if d["op"] in ("BEQ", "J") and d["inmediato"] not in self.mem_inst.etiquetas:
@@ -142,20 +158,12 @@ class UnidadProceso:
 
     # ---------------------------------------------------------------- etapas
     def etapa_wb(self):
-        """
-            Ejecuta la etapa Write Back (WB) del cauce MIPS.
-
-            Recupera la instrucción del registro MEM/WB y escribe el resultado
-            o el dato leído de la memoria en el Banco de Registros
-            (en la primera parte del ciclo).
-        """
         e = self.MEM_WB.actual
         if e is None:
             self.wb_texto = None
             return
         destino = e["reg_destino"]
         if destino is not None and destino != "R0":
-            # LW trae dato_memoria; el resto de instrucciones usa resultado_alu
             valor = e["dato_memoria"] if e["dato_memoria"] is not None else e["resultado_alu"]
             self.banco.escribir(destino, valor)
             self.regs_modificados.add(destino)
@@ -164,13 +172,6 @@ class UnidadProceso:
         self.n_completadas += 1
 
     def etapa_mem(self):
-        """
-            Ejecuta la etapa Memory (MEM) del cauce MIPS.
-
-            Realiza el acceso a la memoria de datos si la instrucción es de acceso a memoria:
-            lee de la memoria si es un 'LW' o escribe en la memoria si es un 'SW'.
-            Carga los resultados en el registro inter-etapa MEM/WB.
-        """
         e = self.EX_MEM.actual
         if e is None:
             self.MEM_WB.siguiente = None
@@ -187,38 +188,41 @@ class UnidadProceso:
             resultado_alu=e["resultado_alu"], dato_memoria=dato,
         )
 
-    def etapa_ex(self):
-        """
-            Ejecuta la etapa Execution (EX) del cauce MIPS.
-
-            Realiza el cálculo de la ALU según la operación (tipo R, tipo I o cálculo
-            de dirección para LW/SW) y guarda el resultado en el registro ID/EX -> EX/MEM.
-        """
+    def etapa_ex(self, control):
         e = self.ID_EX.actual
         if e is None:
             self.EX_MEM.siguiente = None
             return
+
         op = e["op"]
+        val_rs = e["val_rs"]
+        val_rt = e["val_rt"]
+
+        fwd_rs, fuente_rs = control.forwarding.obtener_valor_rs(e)
+        if fwd_rs is not None:
+            val_rs = fwd_rs
+            self.eventos.append(f"FORWARDING EX: rs ({e['rs']}) <- {fuente_rs}")
+
+        fwd_rt, fuente_rt = control.forwarding.obtener_valor_rt(e)
+        if fwd_rt is not None:
+            val_rt = fwd_rt
+            self.eventos.append(f"FORWARDING EX: rt ({e['rt']}) <- {fuente_rt}")
+
         if op in OPS_TIPO_R:
-            resultado = self.alu.operar(op, e["val_rs"], e["val_rt"])
+            resultado = self.alu.operar(op, val_rs, val_rt)
         elif op in OPS_TIPO_I:
-            resultado = self.alu.operar(op, e["val_rs"], e["inmediato"])
+            resultado = self.alu.operar(op, val_rs, e["inmediato"])
         elif op in ("LW", "SW"):
-            resultado = self.alu.operar("ADD", e["val_rs"], e["inmediato"])  # dirección
+            resultado = self.alu.operar("ADD", val_rs, e["inmediato"])
         else:
-            resultado = None  # BEQ y J ya se resolvieron en ID
+            resultado = None
+
         self.EX_MEM.cargar_siguiente(
             pc=e["pc"], texto=e["texto"], op=op, reg_destino=e["reg_destino"],
-            resultado_alu=resultado, val_rt=e["val_rt"],
+            resultado_alu=resultado, val_rt=val_rt,
         )
 
     def etapa_id(self, control):
-        """
-            Ejecuta la etapa Instruction Decode (ID) del cauce MIPS.
-
-            Decodifica la instrucción, detecta riesgos RAW (inyectando burbujas),
-            lee los operandos del banco de registros y resuelve la condición de salto.
-        """
         entrada = self.IF_ID.actual
         if entrada is None:
             self.ID_EX.siguiente = None
@@ -226,17 +230,14 @@ class UnidadProceso:
 
         d = decodificar(entrada["texto"])
 
-        # Riesgo RAW: se retiene la instrucción en IF/ID y entra una burbuja en ID/EX
-        if control.detectar_riesgo_raw(d, entrada["texto"]):
+        if control.detectar_riesgo_load_use(d, entrada["texto"]):
             self.IF_ID.siguiente = entrada
             self.ID_EX.siguiente = None
             return
 
-        # Lectura de operandos (2.ª mitad del ciclo: WB ya ha escrito)
         val_rs = self.banco.leer(d["rs"]) if d["rs"] else None
         val_rt = self.banco.leer(d["rt"]) if d["rt"] else None
 
-        # Saltos: se resuelven aquí; si se toman, IF hará el flush
         if d["op"] in ("BEQ", "J"):
             control.resolver_salto(d, val_rs, val_rt, entrada["texto"])
 
@@ -247,12 +248,6 @@ class UnidadProceso:
         )
 
     def etapa_if(self, control):
-        """
-            Ejecuta la etapa Instruction Fetch (IF) del cauce MIPS.
-
-            Lee la instrucción apuntada por el PC en la memoria de instrucciones,
-            gestiona las paradas (stalls) y aplica los vaciados (flushes) en caso de salto.
-        """
         seg = control.segmentacion
         if seg.stall:
             seg.registrar("IF: PC retenido, no se captura instrucción")
@@ -265,42 +260,43 @@ class UnidadProceso:
             self.IF_ID.cargar_siguiente(pc=self.PC, texto=texto)
             self.PC += 1
 
-        # Salto tomado: PC a la etiqueta y vaciado de la instrucción capturada
         if seg.destino_salto is not None:
             self.PC = seg.destino_salto
             self.IF_ID.vaciar()
             seg.registrar_flush(texto if texto is not None else "NOP")
 
     def _texto(self, registro):
-        return registro.actual["texto"] if registro.actual else "NOP"
+        return registro.actual["texto"] if registro.actual else f"{COLOR_DIM}NOP{COLOR_RESET}"
 
     def mostrar_estado(self, control):
         regs = sorted(self.regs_modificados, key=lambda r: int(r[1:]))
         regs_txt = ", ".join(f"{r}: {self.banco.registros[r]}" for r in regs)
         mem_txt = ", ".join(f"{a}: {v}" for a, v in sorted(self.mem_datos.datos.items()))
-        retenida = " (retenida por stall)" if control.segmentacion.stall else ""
+        retenida = f" {COLOR_DIM}(retenida por stall){COLOR_RESET}" if control.segmentacion.stall else ""
 
-        print(f"==================== CICLO {self.ciclo} ====================")
-        print(f"PC: {self.PC}")
-        print("ETAPAS PIPELINE:")
-        print(f"  [IF ] -> {self._texto(self.IF_ID)}{retenida}")
-        print(f"  [ID ] -> {self._texto(self.ID_EX)}")
-        print(f"  [EX ] -> {self._texto(self.EX_MEM)}")
-        print(f"  [MEM] -> {self._texto(self.MEM_WB)}")
-        print(f"  [WB ] -> {self.wb_texto or 'NOP'}")
-        print(f"Registros modificados: {{{regs_txt}}}")
-        print(f"Memoria de datos: {{{mem_txt}}}")
+        print(f"\n{COLOR_BOLD}==================== CICLO {self.ciclo} ===================={COLOR_RESET}")
+        print(f"{COLOR_BOLD}PC:{COLOR_RESET} {self.PC}")
+        print(f"{COLOR_BOLD}ETAPAS PIPELINE:{COLOR_RESET}")
+        print(f"  {COLOR_IF}[IF ]{COLOR_RESET}  -> {self._texto(self.IF_ID)}{retenida}")
+        print(f"  {COLOR_ID}[ID ]{COLOR_RESET}  -> {self._texto(self.ID_EX)}")
+        print(f"  {COLOR_EX}[EX ]{COLOR_RESET}  -> {self._texto(self.EX_MEM)}")
+        print(f"  {COLOR_MEM}[MEM]{COLOR_RESET}  -> {self._texto(self.MEM_WB)}")
+        print(f"  {COLOR_WB}[WB ]{COLOR_RESET}  -> {self.wb_texto or f'{COLOR_DIM}NOP{COLOR_RESET}'}")
+        print(f"{COLOR_BOLD}Registros modificados:{COLOR_RESET} {{{regs_txt}}}")
+        print(f"{COLOR_BOLD}Memoria de datos:{COLOR_RESET}      {{{mem_txt}}}")
+
         for ev in self.eventos + control.segmentacion.eventos:
-            print(f"  * {ev}")
-        print("=" * 49)
+            print(f"  {COLOR_EVENTO}*{COLOR_RESET} {ev}")
+
+        print(f"{COLOR_BOLD}" + "=" * 49 + f"{COLOR_RESET}")
 
     def mostrar_resumen(self, control):
         seg = control.segmentacion
         regs = sorted(self.regs_modificados, key=lambda r: int(r[1:]))
-        print("\n################ RESUMEN FINAL ################")
+        print(f"\n{COLOR_BOLD}################ RESUMEN FINAL ################{COLOR_RESET}")
         print(f"Ciclos totales:            {self.ciclo}")
         print(f"Instrucciones completadas: {self.n_completadas}")
-        print(f"Stalls (burbujas RAW):     {seg.n_stalls}")
+        print(f"Stalls (riesgos Load-Use): {seg.n_stalls}")
         print(f"Flushes por salto:         {seg.n_flushes}")
         if self.n_completadas:
             print(f"CPI:                       {self.ciclo / self.n_completadas:.2f}")
@@ -309,36 +305,57 @@ class UnidadProceso:
         print("Memoria de datos final:    " + ", ".join(
             f"MEM[{a}]={v}" for a, v in sorted(self.mem_datos.datos.items())))
 
+
 class Forwarding:
-    """
-        Compara los registros fuente (rs, rt) de la instrucción en la etapa ID con
-        los registros de destino de las instrucciones en curso en las etapas EX y MEM.
-        Ignora las coincidencias en la etapa WB, ya que la escritura en el Banco de Registros
-        ocurre en la primera mitad del ciclo y la lectura en la segunda.
-    """
     def __init__(self, unidad_proceso):
         self.proceso = unidad_proceso
-        self.habilitado = False
+        self.habilitado = True
 
-    def detectar_raw(self, decodificada):
+    def obtener_valor_rs(self, etapa_id_ex):
+        if not self.habilitado:
+            return None, None
         p = self.proceso
-        fuentes = {r for r in (decodificada["rs"], decodificada["rt"])
-                   if r is not None and r != "R0"}
-        conflictos = []
-        # ID_EX.actual = instrucción en EX; EX_MEM.actual = instrucción en MEM
-        for etapa, nombre in ((p.ID_EX.actual, "EX"), (p.EX_MEM.actual, "MEM")):
-            if etapa is not None and etapa["reg_destino"] in fuentes:
-                conflictos.append((etapa["reg_destino"], etapa["texto"], nombre))
-        return conflictos
+        rs = etapa_id_ex["rs"]
+        if not rs or rs == "R0":
+            return None, None
+
+        ex_mem = p.EX_MEM.actual
+        if ex_mem is not None and ex_mem["reg_destino"] == rs and ex_mem["reg_destino"] is not None:
+            if ex_mem["op"] != "LW":
+                return ex_mem["resultado_alu"], "EX/MEM"
+
+        mem_wb = p.MEM_WB.actual
+        if mem_wb is not None and mem_wb["reg_destino"] == rs and mem_wb["reg_destino"] is not None:
+            val = mem_wb["dato_memoria"] if mem_wb["dato_memoria"] is not None else mem_wb["resultado_alu"]
+            return val, "MEM/WB"
+
+        return None, None
+
+    def obtener_valor_rt(self, etapa_id_ex):
+        if not self.habilitado:
+            return None, None
+        p = self.proceso
+        rt = etapa_id_ex["rt"]
+        if not rt or rt == "R0":
+            return None, None
+
+        ex_mem = p.EX_MEM.actual
+        if ex_mem is not None and ex_mem["reg_destino"] == rt and ex_mem["reg_destino"] is not None:
+            if ex_mem["op"] != "LW":
+                return ex_mem["resultado_alu"], "EX/MEM"
+
+        mem_wb = p.MEM_WB.actual
+        if mem_wb is not None and mem_wb["reg_destino"] == rt and mem_wb["reg_destino"] is not None:
+            val = mem_wb["dato_memoria"] if mem_wb["dato_memoria"] is not None else mem_wb["resultado_alu"]
+            return val, "MEM/WB"
+
+        return None, None
+
 
 class Segmentacion:
-    """
-        Rastrea las paradas del cauce, la dirección de destino de los saltos
-        y acumula los eventos y contadores globales de stalls y flushes.
-    """
     def __init__(self):
-        self.stall = False          # hay parada en este ciclo
-        self.destino_salto = None   # índice de instrucción si se toma un salto
+        self.stall = False
+        self.destino_salto = None
         self.n_stalls = 0
         self.n_flushes = 0
         self.eventos = []
@@ -364,12 +381,8 @@ class Segmentacion:
         self.n_flushes += 1
         self.eventos.append(f"FLUSH: descartada '{descartada}' capturada en IF")
 
+
 class UnidadControl:
-    """
-        Gestiona el control de riesgos de datos (RAW) y la resolución de saltos en el cauce.
-        Supervisa la detección de dependencias RAW para la inyección de paradas (stalls)
-        y evalúa las condiciones de los saltos (BEQ, J) para actualizar el PC y gestionar los flushes.
-    """
     def __init__(self, unidad_proceso):
         self.proceso = unidad_proceso
         self.forwarding = Forwarding(unidad_proceso)
@@ -378,19 +391,19 @@ class UnidadControl:
     def nuevo_ciclo(self):
         self.segmentacion.nuevo_ciclo()
 
-    def detectar_riesgo_raw(self, decodificada, texto):
-        """True si la instrucción en ID debe esperar (y deja anotada la parada)."""
-        if self.forwarding.habilitado:
-            raise NotImplementedError("El enunciado no permite forwarding por hardware")
-        conflictos = self.forwarding.detectar_raw(decodificada)
-        if not conflictos:
-            return False
-        detalle = ", ".join(f"{r} (de '{t}' en {etapa})" for r, t, etapa in conflictos)
-        self.segmentacion.parar(f"STALL RAW en ID: '{texto}' espera {detalle}")
-        return True
+    def detectar_riesgo_load_use(self, decodificada, texto):
+        p = self.proceso
+        ex_actual = p.ID_EX.actual
+
+        if ex_actual is not None and ex_actual["op"] == "LW":
+            destino_lw = ex_actual["reg_destino"]
+            fuentes_actuales = {decodificada["rs"], decodificada["rt"]}
+            if destino_lw in fuentes_actuales and destino_lw is not None:
+                self.segmentacion.parar(f"STALL LOAD-USE en ID: '{texto}' espera lectura de '{destino_lw}' desde LW")
+                return True
+        return False
 
     def resolver_salto(self, decodificada, val_rs, val_rt, texto):
-        """Para BEQ/J: devuelve (tomado, destino) y anota el salto si se toma."""
         etiqueta = decodificada["inmediato"]
         etiquetas = self.proceso.mem_inst.etiquetas
         if etiqueta not in etiquetas:
@@ -403,10 +416,8 @@ class UnidadControl:
         self.segmentacion.registrar(f"SALTO NO TOMADO: '{texto}'")
         return False, None
 
+
 class CPU:
-    """
-        Clase principal, inicializamos todas las partes necesarias y empezamos el ciclo.
-    """
     def __init__(self, ruta_instrucciones, ruta_datos):
         self.unidad_proceso = UnidadProceso(ruta_instrucciones, ruta_datos)
         self.unidad_control = UnidadControl(self.unidad_proceso)
@@ -417,10 +428,9 @@ class CPU:
         p.eventos = []
         c.nuevo_ciclo()
 
-        # Orden inverso: WB escribe antes de que ID lea
         p.etapa_wb()
         p.etapa_mem()
-        p.etapa_ex()
+        p.etapa_ex(c)
         p.etapa_id(c)
         p.etapa_if(c)
         p.avanzar_reloj()
@@ -433,12 +443,13 @@ class CPU:
             if p.terminado():
                 break
             if p.ciclo >= MAX_CICLOS:
-                raise RuntimeError(f"Se superaron {MAX_CICLOS} ")
+                raise RuntimeError(f"Se superaron {MAX_CICLOS} ciclos")
         p.mostrar_resumen(self.unidad_control)
+
 
 def main():
     base = os.path.dirname(os.path.abspath(__file__))
-    parser = argparse.ArgumentParser(description="Simulador MIPS segmentado de 5 etapas")
+    parser = argparse.ArgumentParser(description="Simulador MIPS segmentado de 5 etapas con Forwarding")
     parser.add_argument("-i", "--instrucciones",
                         default=os.path.join(base, "instrucciones.txt"))
     parser.add_argument("-d", "--datos",
@@ -450,6 +461,7 @@ def main():
     cpu.unidad_proceso.mostrar_decodificacion()
     print()
     cpu.ejecutar()
+
 
 if __name__ == "__main__":
     main()
