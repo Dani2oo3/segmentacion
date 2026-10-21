@@ -1,45 +1,58 @@
-# Simulador MIPS Segmentado de 5 Etapas
+# Simulador MIPS Segmentado de 5 Etapas con Forwarding
 
 Simulador funcional en Python de un procesador con arquitectura **MIPS de 32 bits** que implementa un cauce (pipeline) segmentado de 5 etapas (**IF**, **ID**, **EX**, **MEM**, **WB**). 
 
-Este proyecto permite visualizar y analizar la ejecución paso a paso de instrucciones ensamblador, la decodificación de opcodes y el flujo de datos a través de los registros de desacoplamiento del pipeline.
+Este proyecto permite visualizar y analizar detalladamente la ejecución paso a paso de código en ensamblador, la resolución de riesgos de datos mediante *Forwarding* y *Stalls*, la gestión de saltos con *Flushes*, y el estado del camino de datos en cada ciclo de reloj.
 
 ---
 
-## 🏗️ Arquitectura del Proyecto
+## 🏗️ Arquitectura y Componentes del Proyecto
 
-El proyecto está modularizado en los siguientes componentes principales:
+El proyecto se encuentra modularizado en los siguientes ficheros principales:
 
-* **`componentes_base.py`**: Contiene la infraestructura del procesador.
-  * **Memorias:** `MemoriaInstrucciones` (indexada por PC y mapeo de etiquetas) y `MemoriaDatos` (memoria RAM de lectura/escritura).
-  * **BancoRegistros:** Módulo de registros $R0 \dots R31$ ($R0$ cableado a cero constante).
-  * **ALU:** Unidad Aritmético Lógica para operaciones tipo R y tipo I.
-  * **UnidadControl:** Generación de señales de control (`RegWrite`, `MemRead`, `MemWrite`, `EsSalto`).
-* **`registros_pipeline.py`**: Define las clases para los registros de desacoplamiento entre etapas (`IF_ID`, `ID_EX`, `EX_MEM`, `MEM_WB`) encargados de propagar el estado en cada flanco de reloj (`latch`).
-* **`cpu.py`**: Módulo central y punto de entrada. Integra los componentes, realiza la decodificación de las instrucciones y gestiona el ciclo de reloj y ejecución del pipeline.
-* **`instrucciones.txt`**: Fichero de entrada con el código fuente en ensamblador MIPS.
-* **`datos_iniciales.txt`**: Fichero de configuración para inicializar registros y memoria de datos.
+* **`componentes_base.py`**: Contiene los bloques hardware fundamentales de la CPU:
+  * **Memorias:** `MemoriaInstrucciones` (gestión de carga de ficheros y resolución de etiquetas) y `MemoriaDatos` (memoria RAM de lectura/escritura con validación de alineación a múltiplos de 4).
+  * **BancoRegistros:** Banco de 32 registros (`R0` a `R31`), donde `R0` está permanentemente cableado a cero.
+  * **ALU:** Unidad Aritmético-Lógica encargada de las operaciones aritméticas para instrucciones de tipo R, tipo I y cálculo de direcciones de memoria.
+* **`registros_pipeline.py`**: Define las clases de los registros de desacoplamiento inter-etapa (`RegistroIF_ID`, `RegistroID_EX`, `RegistroEX_MEM`, `RegistroMEM_WB`) que propagan el estado y sincronizan el cauce en cada flanco de reloj mediante la función `latch()`.
+* **`cpu.py`**: Módulo central y punto de entrada de la aplicación. Integra la unidad de proceso, la unidad de control, la lógica de riesgos y la interfaz de salida formateada por consola.
+* **`instrucciones.txt`**: Fichero predeterminado con el código fuente en ensamblador MIPS para la ejecución principal.
+* **`datos_iniciales.txt`**: Fichero de configuración inicial que define los valores de los registros y el estado inicial de la memoria de datos.
+* **`aux.txt` y `aux2.txt`**: Ficheros alternativos de código ensamblador MIPS incluidos para pruebas adicionales del simulador.
 
 ---
 
-## ⚙️ Etapas del Pipeline
+## ⚙️ Etapas del Pipeline y Características Avanzadas
 
-El cauce simula la ejecución concurrente mediante la evaluación de etapas en orden inverso por ciclo de reloj:
+El cauce simula la ejecución concurrente evaluando las etapas en orden inverso en cada ciclo de reloj para asegurar un traspaso transparente de datos:
 
-1. **WB (Write-Back):** Escritura del resultado en el banco de registros.
-2. **MEM (Memory):** Lectura o escritura en la memoria de datos (`LW`, `SW`).
-3. **EX (Execution):** Operación en la ALU o cálculo de direcciones efectivas.
-4. **ID (Instruction Decode):** Decodificación, lectura de operandos en el banco de registros y extracción de inmediatos/etiquetas.
-5. **IF (Instruction Fetch):** Lectura de la instrucción en memoria apuntada por el `PC`.
+1. **WB (Write-Back):** Escritura de los resultados calculados en el banco de registros.
+2. **MEM (Memory):** Operaciones de lectura (`LW`) o escritura (`SW`) en la memoria de datos.
+3. **EX (Execution):** Operación en la ALU y aplicación de adelantamiento de datos (*Forwarding*) desde las etapas `EX/MEM` y `MEM/WB`.
+4. **ID (Instruction Decode):** Decodificación de la instrucción, lectura de operandos en el banco de registros y resolución anticipada de saltos (`BEQ`, `J`).
+5. **IF (Instruction Fetch):** Captura de la instrucción desde la memoria apuntada por el registro `PC`.
+
+### Gestión de Riesgos y Control
+* **Forwarding (Adelantamiento):** Resuelve los riesgos de datos RAW (Read-After-Write) alimentando directamente los resultados hacia la ALU sin paradas innecesarias.
+* **Stalls (Riesgos Load-Use):** Detección automática de dependencias críticas de tipo *Load-Use* donde el *Forwarding* no es suficiente, insertando una parada (*stall*) de forma segura.
+* **Flushes:** Vaciado especulativo de la etapa de captura (`IF/ID`) cuando se toma un salto condicional o incondicional.
+
+---
+
+## 🎨 Interfaz de Terminal y Formato Visual
+
+La salida por consola presenta mejoras de diseño orientadas a la legibilidad:
+* **Colores ANSI fijos por etapa** (`IF`, `ID`, `EX`, `MEM`, `WB`) para seguir la pista de cada instrucción de un vistazo.
+* **Trazas de eventos en color distintivo** para identificar instantáneamente la aplicación de *Forwarding*, paradas por *Stall*, saltos tomados/no tomados y *Flushes*.
 
 ---
 
 ## 🚀 Requisitos e Instalación
 
 ### Requisitos previos
-* **Python 3.8+** instalado.
+* **Python 3.8 o superior** instalado en el sistema.
 
-### Clonar el repositorio
+### Clonar e iniciar el proyecto
 ```bash
 git clone [https://github.com/Dani2oo3/segmentacion.git](https://github.com/Dani2oo3/segmentacion.git)
 cd segmentacion
